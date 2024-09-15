@@ -1,6 +1,22 @@
 import { sha256 } from "../plugin/sha256";
 import { Token } from "../plugin/token";
 import User from "../model/user";
+import AuthQr from "../model/authQr";
+import QRCode from "qrcode";
+
+function generateRandomString(length) {
+  const characters =
+    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789";
+  let result = "";
+  const charactersLength = characters.length;
+
+  for (let i = 0; i < length; i++) {
+    const randomIndex = Math.floor(Math.random() * charactersLength);
+    result += characters.charAt(randomIndex);
+  }
+
+  return result;
+}
 
 class AuthController {
   register = async (req, res) => {
@@ -76,6 +92,56 @@ class AuthController {
       return res.status(200).json(token);
     } catch (error) {
       throw error;
+    }
+  }
+  async loginWithQr(req, res) {
+    try {
+      let { token } = req.body;
+      let qr = await AuthQr.findOne({ token, ok: true });
+      if (qr) {
+        const user = await User.findOne({ _id: qr.userId });
+        if (user) {
+          let payload = {
+            id: user.id,
+            name: user.name,
+            role: user.role,
+          };
+          const generateToken = Token.sign({ payload });
+          return res.status(200).json({
+            success: true,
+            data: {
+              ...generateToken,
+              user: payload,
+            },
+          });
+        }
+        return res.status(200).json({ success: false });
+      }
+      return res.status(200).json({ success: false });
+    } catch (error) {
+      throw error;
+    }
+  }
+  async createQrLogin(req, res) {
+    const now = new Date();
+    const textRandom = generateRandomString(10);
+    const token = `${now.getTime()}${textRandom}`;
+    let qr = await QRCode.toDataURL(token);
+    await AuthQr.create({ token, ok: false, userId: null });
+    return res.status(200).json(qr);
+  }
+
+  async confirmLoginQr(req, res) {
+    let { token } = req.body;
+    let qr = await AuthQr.findOne({ token });
+    if (!qr) {
+      return res.status(500).json({ message: "Mã đăng nhập hết hạn" });
+    } else {
+      await AuthQr.updateOne(
+        { _id: qr._id },
+        { ok: true, userId: req.user.id }
+      );
+      return res.status(200).json({ success: true });
     }
   }
 }
